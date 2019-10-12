@@ -320,10 +320,45 @@ int cnd_broadcast(cnd_t* cond) {
     return result ? thrd_success : thrd_error;
 }
 
+static int ___cnd_wait_handle(cnd_t* cond, mtx_t* mutex, DWORD ms) {
+    // The CRITICAL_SECTION cond->lock will have already been entered when this function
+    // is called.
+
+    if(cond->sem == NULL) {
+        cond->sem = CreateSemaphore(NULL, 0, INFINITE, NULL);
+        if(!cond->sem) {
+            LeaveCriticalSection(&cond->lock);
+            return thrd_error;
+        }
+    }
+    int result;
+    cond->queue |= (1ull << cond->shift);
+    cond->waiters++;
+    LeaveCriticalSection(&cond->lock);
+
+    // Temporarily release lock.
+    mutex->type == mtx_timed ? ReleaseSemaphore(mutex->handle, 1, NULL) : ReleaseMutex(mutex->handle);
+
+    // Wait for the condition variable to be signaled.
+    switch(WaitForSingleObject(cond->sem, ms)) {
+        case WAIT_ABANDONED:
+        case WAIT_OBJECT_0:
+            result = thrd_success;
+            break;
+        case WAIT_TIMEOUT:
+            result = thrd_timedout;
+            break;
+        default:
+            result = FALSE;
+    }
+
+    // Reacquire lock
+    WaitForSingleObject(mutex->handle, INFINITE);
+    return result;
+}
+
 static int ___cnd_wait_impl(cnd_t* cond, mtx_t* mutex, DWORD ms) {
     EnterCriticalSection(&cond->lock);
-
-    int result = TRUE;
 
     if(cond->shift + 1 == 64){
         LeaveCriticalSection(&cond->lock);
@@ -336,65 +371,18 @@ static int ___cnd_wait_impl(cnd_t* cond, mtx_t* mutex, DWORD ms) {
         case mtx_plain:
             cond->queue &= ~(1ull << cond->shift);
             LeaveCriticalSection(&cond->lock);
-            result = SleepConditionVariableSRW(&cond->variable, &mutex->lock, ms, 0) ? thrd_success : thrd_error;
+            return SleepConditionVariableSRW(&cond->variable, &mutex->lock, ms, 0) ? thrd_success : thrd_error;
         case mtx_plain | mtx_recursive:
             cond->queue &= ~(1ull << cond->shift);
             LeaveCriticalSection(&cond->lock);
-            result = SleepConditionVariableCS(&cond->variable, &mutex->section, ms) ? thrd_success : thrd_error;
-            break;
+            return SleepConditionVariableCS(&cond->variable, &mutex->section, ms) ? thrd_success : thrd_error;
         case mtx_timed:
-            if(cond->sem == NULL) {
-                cond->sem = CreateSemaphore(NULL, 0, INFINITE, NULL);
-                if(!cond->sem) {
-                    LeaveCriticalSection(&cond->lock);
-                    return thrd_error;
-                }
-            }
-            cond->queue |= (1ull << cond->shift);
-            cond->waiters++;
-            LeaveCriticalSection(&cond->lock);
-            ReleaseSemaphore(mutex->handle, 1, NULL);
-            switch(WaitForSingleObject(cond->sem, ms)) {
-                case WAIT_ABANDONED:
-                case WAIT_OBJECT_0:
-                    result = thrd_success;
-                    break;
-                case WAIT_TIMEOUT:
-                    result = thrd_timedout;
-                    break;
-                default:
-                    result = FALSE;
-            }
-            WaitForSingleObject(mutex->handle, INFINITE);
-            break;
         case mtx_timed | mtx_recursive:
-            if(cond->sem == NULL) {
-                cond->sem = CreateSemaphore(NULL, 0, INFINITE, NULL);
-                if(!cond->sem) {
-                    LeaveCriticalSection(&cond->lock);
-                    return thrd_error;
-                }
-            }
-            cond->queue |= (1ull << cond->shift);
-            cond->waiters++;
-            LeaveCriticalSection(&cond->lock);
-            ReleaseMutex(mutex->handle);
-            switch(WaitForSingleObject(cond->sem, ms)) {
-                case WAIT_ABANDONED:
-                case WAIT_OBJECT_0:
-                    result = thrd_success;
-                    break;
-                case WAIT_TIMEOUT:
-                    result = thrd_timedout;
-                    break;
-                default:
-                    result = FALSE;
-            }
-            WaitForSingleObject(mutex->handle, INFINITE);
-            break;
-    }
+            return ___cnd_wait_handle(cond, mutex, ms);
 
-    return result;
+        default:
+            return thrd_error;
+    }
 }
 
 int cnd_wait(cnd_t* cond, mtx_t* mutex) {
