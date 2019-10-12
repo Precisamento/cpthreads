@@ -28,7 +28,7 @@ And just add `cpthreads_dep` to the list of dependencies passed to the project.
 
 # Testing
 
-The tests are created with the [check]() unit testing library. To build the test project (Windows only) just set the check_location option. The default install location is `C:\Program Files (x86)\check`, if you can't find it.
+The tests are created with the [check](https://libcheck.github.io/check/) unit testing library. To build the test project (Windows only) just set the check_location option. The default install location is `C:\Program Files (x86)\check`, if you can't find it.
 
 ```sh
 meson configure "-Dcheck_location=path/to/check location"
