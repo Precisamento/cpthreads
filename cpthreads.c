@@ -1,3 +1,5 @@
+#ifdef _MSC_VER
+
 #include "cpthreads.h"
 
 #include <stdio.h>
@@ -433,3 +435,5 @@ void tss_delete(tss_t tss_key) {
             destructor_stack[tss_key] = NULL;
     }
 }
+
+#endif

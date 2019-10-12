@@ -17,6 +17,15 @@ meson .. --buildtype=release
 ninja
 ```
 
+You can also include it as a Meson subproject and include it like so:
+
+```meson
+cpthreads_proj = subproject('cpthreads')
+cpthreads_dep = cpthreads_proj.get_variable('cpthreads_dep')
+```
+
+And just add `cpthreads_dep` to the list of dependencies passed to the project.
+
 # Testing
 
 The tests are created with the [check]() unit testing library. To build the test project (Windows only) just set the check_location option. The default install location is `C:\Program Files (x86)\check`, if you can't find it.
