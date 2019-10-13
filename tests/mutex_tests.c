@@ -38,20 +38,6 @@ START_TEST(mtx_init_timed_recursive) {
 }
 END_TEST
 
-#define MUTEX_TYPES 4
-
-static void initialize_mutexes(mtx_t mutexes[MUTEX_TYPES]) {
-    assert_thrd(mtx_init(mutexes++, mtx_plain));
-    assert_thrd(mtx_init(mutexes++, mtx_timed));
-    assert_thrd(mtx_init(mutexes++, mtx_plain | mtx_recursive));
-    assert_thrd(mtx_init(mutexes++, mtx_timed | mtx_recursive));
-}
-
-static void free_mutexes(mtx_t mutexes[MUTEX_TYPES]) {
-    for(int i = 0; i < MUTEX_TYPES; i++)
-        mtx_destroy(mutexes + i);
-}
-
 static int single_lock_test(void* arg) {
     mtx_t* mutex = arg;
     if(mtx_lock(mutex) != thrd_success)

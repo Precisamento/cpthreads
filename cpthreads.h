@@ -136,12 +136,13 @@ static __inline void call_once(once_flag* flag, void(*func)(void)) {
 // ============================================================================
 
 typedef struct cnd_t {
-    CRITICAL_SECTION lock;
+    CRITICAL_SECTION queue_lock;
     CONDITION_VARIABLE variable;
+    HANDLE* handles;
     unsigned long long queue;
-    HANDLE sem;
-    int waiters;
     int shift;
+    int handle_count;
+    int handle_cap;
 } cnd_t;
 
 int cnd_init(cnd_t* cond);

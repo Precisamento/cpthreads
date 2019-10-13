@@ -26,8 +26,6 @@
 
 #include "cpthreads.h"
 
-#include <stdio.h>
-
 // Variables for Thread Specific Storage
 static tss_dtor_t* destructor_stack = NULL;
 static int destructor_stack_count = 0;
@@ -271,97 +269,69 @@ void mtx_destroy(mtx_t* mutex) {
     }
 }
 
+enum {
+    CONDITION_USE_VARIABLE = 0,
+    CONDITION_USE_LOCK = 1
+};
+
+#define CONDITION_NO_WAITERS -1
+
 int cnd_init(cnd_t* cond) {
-    InitializeCriticalSection(&cond->lock);
+    InitializeCriticalSection(&cond->queue_lock);
     InitializeConditionVariable(&cond->variable);
+    cond->handles = NULL;
     cond->queue = 0;
-    cond->sem = NULL;
-    cond->waiters = 0;
-    cond->shift = -1;
+    cond->shift = CONDITION_NO_WAITERS;
+    cond->handle_count = 0;
+    cond->handle_cap = 0;
     return thrd_success;
 }
 
 int cnd_signal(cnd_t* cond) {
-    EnterCriticalSection(&cond->lock);
+    EnterCriticalSection(&cond->queue_lock);
     BOOLEAN result = TRUE;
 
-    if(cond->shift == -1)
-        goto RESULT;
+    if(cond->shift == CONDITION_NO_WAITERS)
+        goto end;
 
-    if((cond->queue & (1 << cond->shift)) == 0)
+    if((cond->queue & (1 << cond->shift--)) == CONDITION_USE_VARIABLE)
         WakeConditionVariable(&cond->variable);
-    else {
-        cond->waiters--;
-        result = ReleaseSemaphore(cond->sem, 1, NULL);
-    }
+    else
+        result = ReleaseSemaphore(cond->handles[--cond->handle_count], 1, NULL);
 
-    LeaveCriticalSection(&cond->lock);
-
-    RESULT:
-    return result ? thrd_success : thrd_error;
+    end:
+        LeaveCriticalSection(&cond->queue_lock);
+        return result ? thrd_success : thrd_error;
 }
 
 int cnd_broadcast(cnd_t* cond) {
-    EnterCriticalSection(&cond->lock);
+    EnterCriticalSection(&cond->queue_lock);
     BOOLEAN result = TRUE;
 
-    if(cond->shift == -1)
-        goto RESULT;
+    if(cond->shift == CONDITION_NO_WAITERS)
+        goto end;
 
     WakeAllConditionVariable(&cond->variable);
-    if(cond->waiters > 0) {
-        result = ReleaseSemaphore(cond->sem, cond->waiters, NULL);
-        cond->waiters = 0;
-    }
 
-    LeaveCriticalSection(&cond->lock);
-
-    RESULT:
-    return result ? thrd_success : thrd_error;
-}
-
-static int ___cnd_wait_handle(cnd_t* cond, mtx_t* mutex, DWORD ms) {
-    // The CRITICAL_SECTION cond->lock will have already been entered when this function
-    // is called.
-
-    if(cond->sem == NULL) {
-        cond->sem = CreateSemaphore(NULL, 0, INFINITE, NULL);
-        if(!cond->sem) {
-            LeaveCriticalSection(&cond->lock);
-            return thrd_error;
+    if(cond->handle_count > 0) {
+        BOOLEAN success = TRUE;
+        while(cond->handle_count > 0) {
+            if(!ReleaseSemaphore(cond->handles[--cond->handle_count], 1, NULL) && result)
+                result = FALSE;
         }
     }
-    int result;
-    cond->queue |= (1ull << cond->shift);
-    cond->waiters++;
-    LeaveCriticalSection(&cond->lock);
 
-    // Temporarily release lock.
-    mutex->type == mtx_timed ? ReleaseSemaphore(mutex->handle, 1, NULL) : ReleaseMutex(mutex->handle);
+    cond->shift = CONDITION_NO_WAITERS;
 
-    // Wait for the condition variable to be signaled.
-    switch(WaitForSingleObject(cond->sem, ms)) {
-        case WAIT_ABANDONED:
-        case WAIT_OBJECT_0:
-            result = thrd_success;
-            break;
-        case WAIT_TIMEOUT:
-            result = thrd_timedout;
-            break;
-        default:
-            result = FALSE;
-    }
-
-    // Reacquire lock
-    WaitForSingleObject(mutex->handle, INFINITE);
-    return result;
+    end:
+        LeaveCriticalSection(&cond->queue_lock);
+        return result ? thrd_success : thrd_error;
 }
 
-static int ___cnd_wait_impl(cnd_t* cond, mtx_t* mutex, DWORD ms) {
-    EnterCriticalSection(&cond->lock);
-
-    if(cond->shift + 1 == 64){
-        LeaveCriticalSection(&cond->lock);
+static int cnd_wait_ms(cnd_t* cond, mtx_t* mutex, DWORD ms) {
+    EnterCriticalSection(&cond->queue_lock);
+    if(cond->shift + 1 == 64) {
+        LeaveCriticalSection(&cond->queue_lock);
         return thrd_error;
     }
 
@@ -370,36 +340,76 @@ static int ___cnd_wait_impl(cnd_t* cond, mtx_t* mutex, DWORD ms) {
     switch(mutex->type) {
         case mtx_plain:
             cond->queue &= ~(1ull << cond->shift);
-            LeaveCriticalSection(&cond->lock);
+            LeaveCriticalSection(&cond->queue_lock);
             return SleepConditionVariableSRW(&cond->variable, &mutex->lock, ms, 0) ? thrd_success : thrd_error;
         case mtx_plain | mtx_recursive:
             cond->queue &= ~(1ull << cond->shift);
-            LeaveCriticalSection(&cond->lock);
+            LeaveCriticalSection(&cond->queue_lock);
             return SleepConditionVariableCS(&cond->variable, &mutex->section, ms) ? thrd_success : thrd_error;
         case mtx_timed:
         case mtx_timed | mtx_recursive:
-            return ___cnd_wait_handle(cond, mutex, ms);
+            if(cond->handle_count == cond->handle_cap) {
+                if(cond->handle_cap == 0) {
+                    cond->handle_cap = 4;
+                    cond->handles = malloc(sizeof(*cond->handles) * 4);
+                    if(!cond->handles) {
+                        LeaveCriticalSection(&cond->queue_lock);
+                        return thrd_error;
+                    }
+                } else {
+                    cond->handle_cap *= 1.5f;
+                    void* buff = realloc(cond->handles, sizeof(*cond->handles) * cond->handle_cap);
+                    if(!buff) {
+                        LeaveCriticalSection(&cond->queue_lock);
+                        return thrd_error;
+                    }
+                    cond->handles = buff;
+                }
+            }
 
+            cond->queue |= (1ull << cond->shift);
+            HANDLE sem = CreateSemaphore(NULL, 0, 1, NULL);
+            cond->handles[cond->handle_count++] = sem;
+            if(sem == NULL ||
+                !(mutex->type  == mtx_timed ? ReleaseSemaphore(mutex->handle, 1, NULL) : 
+                                              ReleaseMutex(mutex->handle))) 
+            {
+                cond->handle_count--;
+                return thrd_error;
+            }
+            LeaveCriticalSection(&cond->queue_lock);
+            int result;
+            switch(WaitForSingleObject(sem, ms)) {
+                case WAIT_ABANDONED:
+                case WAIT_OBJECT_0:
+                    result = thrd_success;
+                    break;
+                default:
+                    result = thrd_error;
+                    break;
+            }
+            CloseHandle(sem);
+            WaitForSingleObject(&mutex->handle, INFINITE);
+            return result;
         default:
             return thrd_error;
     }
 }
 
 int cnd_wait(cnd_t* cond, mtx_t* mutex) {
-    return ___cnd_wait_impl(cond, mutex, INFINITE);
+    return cnd_wait_ms(cond, mutex, INFINITE);
 }
 
 int cnd_timedwait(cnd_t* cond, mtx_t* mutex, const struct timespec* time_point) {
     DWORD ms = (DWORD) (time_point->tv_sec * 1000 + time_point->tv_nsec / 1000000);
-    return ___cnd_wait_impl(cond, mutex, ms);
+    return cnd_wait_ms(cond, mutex, ms);
 }
 
 void cnd_destroy(cnd_t* cond) {
-    DeleteCriticalSection(&cond->lock);
-    if(cond->sem != NULL) {
-        CloseHandle(cond->sem);
-        cond->sem = NULL;
-    }
+    DeleteCriticalSection(&cond->queue_lock);
+    while(cond->handle_count > 0)
+        CloseHandle(cond->handles[--cond->handle_count]);
+    free(cond->handles);
 }
 
 static once_flag destructor_stack_flag = ONCE_FLAG_INIT;

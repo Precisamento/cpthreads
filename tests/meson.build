@@ -43,9 +43,18 @@ if check_location != ''
         include_directories: inc,
         dependencies: deps
     )
+
+    cnd_test = executable('cnd_test',
+        'cnd_tests.c',
+        link_with: cpthreads,
+        link_args: test_link_args,
+        include_directories: inc,
+        dependencies: deps
+    )
     
     test('Thread Test', thread_test)
     test('Mutex Test', mutex_test)
     test('TSS Test', tss_test)
+    test('Condition Test', cnd_test)
 endif
 
