@@ -58,6 +58,8 @@ unsigned int __stdcall ___cp_thrd_func(struct ___cp_thrd_state* state) {
 }
 
 int thrd_create(thrd_t* thr, thrd_start_t func, void* arg) {
+    if(!thr)
+        return thrd_error;
     thr->state.arg = arg;
     thr->state.func = func;
     thr->handle = (HANDLE)_beginthreadex(NULL, 
@@ -92,6 +94,8 @@ static void thrd_sleep_init(void) {
 }
 
 int thrd_sleep(const struct timespec* duration, struct timespec* remaining) {
+    if(!duration)
+        return thrd_error;
     call_once(&sleep_flag, thrd_sleep_init);
     LARGE_INTEGER interval;
     interval.QuadPart = -1 * (long long)(duration->tv_sec * 10000000) + (long long)(duration->tv_nsec / 100);
@@ -172,6 +176,8 @@ int mtx_lock(mtx_t* mutex) {
             break;
         case mtx_timed:
         case mtx_timed | mtx_recursive:
+            if(!mutex->handle)
+                return thrd_error;
             switch(WaitForSingleObject(mutex->handle, INFINITE)) {
                 case WAIT_ABANDONED:
                 case WAIT_OBJECT_0:
@@ -215,6 +221,8 @@ int mtx_trylock(mtx_t* mutex) {
             break;
         case mtx_timed:
         case mtx_timed | mtx_recursive:
+            if(!mutex->handle)
+                return thrd_error;
             switch(WaitForSingleObject(mutex->handle, 0)) {
                 case WAIT_ABANDONED:
                 case WAIT_OBJECT_0:
@@ -241,10 +249,14 @@ int mtx_unlock(mtx_t* mutex) {
             LeaveCriticalSection(&mutex->section);
             break;
         case mtx_timed:
+            if(!mutex->handle)
+                return thrd_error;
             if(!ReleaseSemaphore(mutex->handle, 1, NULL))
                 return thrd_error;
             break;
         case mtx_timed | mtx_recursive:
+            if(!mutex->handle)
+                return thrd_error;
             if(!ReleaseMutex(mutex->handle))
                 return thrd_error;
             break;
@@ -265,7 +277,10 @@ void mtx_destroy(mtx_t* mutex) {
             break;
         case mtx_timed:
         case mtx_timed | mtx_recursive:
+            if(!mutex->handle)
+                return;
             CloseHandle(mutex->handle);
+            mutex->handle = NULL;
     }
 }
 
@@ -277,6 +292,8 @@ enum {
 #define CONDITION_NO_WAITERS -1
 
 int cnd_init(cnd_t* cond) {
+    if(!cond)
+        return thrd_error;
     InitializeCriticalSection(&cond->queue_lock);
     InitializeConditionVariable(&cond->variable);
     cond->handles = NULL;
@@ -288,6 +305,9 @@ int cnd_init(cnd_t* cond) {
 }
 
 int cnd_signal(cnd_t* cond) {
+    if(!cond)
+        return thrd_error;
+
     EnterCriticalSection(&cond->queue_lock);
     BOOLEAN result = TRUE;
 
@@ -305,6 +325,9 @@ int cnd_signal(cnd_t* cond) {
 }
 
 int cnd_broadcast(cnd_t* cond) {
+    if(!cond)
+        return thrd_error;
+    
     EnterCriticalSection(&cond->queue_lock);
     BOOLEAN result = TRUE;
 
@@ -329,6 +352,9 @@ int cnd_broadcast(cnd_t* cond) {
 }
 
 static int cnd_wait_ms(cnd_t* cond, mtx_t* mutex, DWORD ms) {
+    if(!cond || !mutex)
+        return thrd_error;
+    
     EnterCriticalSection(&cond->queue_lock);
     if(cond->shift + 1 == 64) {
         LeaveCriticalSection(&cond->queue_lock);
@@ -348,6 +374,11 @@ static int cnd_wait_ms(cnd_t* cond, mtx_t* mutex, DWORD ms) {
             return SleepConditionVariableCS(&cond->variable, &mutex->section, ms) ? thrd_success : thrd_error;
         case mtx_timed:
         case mtx_timed | mtx_recursive:
+            if(!mutex->handle) {
+                LeaveCriticalSection(&cond->queue_lock);
+                return thrd_error;
+            }
+
             if(cond->handle_count == cond->handle_cap) {
                 if(cond->handle_cap == 0) {
                     cond->handle_cap = 4;
@@ -401,11 +432,16 @@ int cnd_wait(cnd_t* cond, mtx_t* mutex) {
 }
 
 int cnd_timedwait(cnd_t* cond, mtx_t* mutex, const struct timespec* time_point) {
+    if(!time_point)
+        return thrd_error;
     DWORD ms = (DWORD) (time_point->tv_sec * 1000 + time_point->tv_nsec / 1000000);
     return cnd_wait_ms(cond, mutex, ms);
 }
 
 void cnd_destroy(cnd_t* cond) {
+    if(!cond)
+        return;
+
     DeleteCriticalSection(&cond->queue_lock);
     while(cond->handle_count > 0)
         CloseHandle(cond->handles[--cond->handle_count]);
