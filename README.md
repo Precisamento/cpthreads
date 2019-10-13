@@ -2,7 +2,7 @@
 
 This project implements the C11 threading header `threads.h` for Windows. You can include it in projects that target windows, linux, MacOS, etc, and as long as the compiler is either MSVC (cl.exe) or a compiler that implements threads.h, the standard threading functions will be available.
 
-It is designed to function as closely to the standard as possible, but it's not perfect. In particular, `thrd_sleep` only has millisecond accuracy by default, and its second parameter is never set. Also, the `cnd_*` functions are currently untested, and probably won't work with timed mutex types, but should work as expected with both plain mutex types.
+It is designed to function as closely to the standard as possible, but it's not perfect. In particular, `thrd_sleep` only has millisecond accuracy by default, and its second parameter is never set.
 
 # Building
 
