@@ -72,7 +72,13 @@ static int time_lock_test(void* arg) {
     TimeLock* lock = arg;
     DWORD id = GetCurrentThreadId();
     int result;
-    if((result = mtx_timedlock(lock->mutex, &ms2ts(lock->time_out_ms))) != thrd_success)
+
+    struct timespec absolute;
+    timespec_get(&absolute, TIME_UTC);
+    absolute.tv_sec += lock->time_out_ms / 1000;
+    absolute.tv_nsec += (lock->time_out_ms % 1000) * 1000000;
+
+    if((result = mtx_timedlock(lock->mutex, &absolute)) != thrd_success)
         return result;
     result = thrd_sleep(&ms2ts(lock->sleep_ms), NULL);
     mtx_unlock(lock->mutex);
@@ -133,6 +139,7 @@ START_TEST(mtx_timed_lock_second_times_out) {
     assert_thrd(mtx_init(mutexes + 1, mtx_timed | mtx_recursive));
 
     for(int i = 0; i < 2; i++) {
+        printf("Iteration %d\n", i);
         thrd_t thread1, thread2;
         int result1, result2;
         assert_thrd(thrd_create(&thread1, time_lock_test, &(TimeLock){ 2000, 0, mutexes + i }));
@@ -140,6 +147,7 @@ START_TEST(mtx_timed_lock_second_times_out) {
         assert_thrd(thrd_create(&thread2, time_lock_test, &(TimeLock){ 100, 50, mutexes + i }));
         assert_thrd(thrd_join(thread1, &result1));
         assert_thrd(thrd_join(thread2, &result2));
+        printf("Result: %d\n", result1);
         ck_assert(result1 == thrd_success);
         ck_assert(result2 == thrd_timedout);
     }

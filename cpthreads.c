@@ -40,6 +40,19 @@ static void thread_specific_storage_cleanup(void) {
     }
 }
 
+// Helper function to subtract timespecs properly. Doesn't handle overflow.
+static void timespec_subtract(const struct timespec* left, const struct timespec* right, struct timespec* result) {
+    struct timespec temp = *left;
+    // Use a loop in order to fix malformed timespecs.
+    while(temp.tv_nsec - right->tv_nsec < 0) {
+        temp.tv_sec -= 1;
+        temp.tv_nsec += 1000000000L;
+    }
+    temp.tv_sec -= right->tv_sec;
+    temp.tv_nsec -= right->tv_nsec;
+    *result = temp;
+}
+
 struct ___cp_thrd_state {
     thrd_start_t func;
     void* arg;
@@ -74,7 +87,6 @@ int thrd_create(thrd_t* thr, thrd_start_t func, void* arg) {
         return thrd_success;
 }
 
-#ifdef CP_ACCURATE_SLEEP
 // This isn't used, but if you're looking for a more accurate sleep
 // function you could alter the header to use this instead.
 // The code can mostly be found here: 
@@ -93,18 +105,26 @@ static void thrd_sleep_init(void) {
     ZwSetTimerResolution(1, TRUE, &actualResolution);
 }
 
+#include <stdio.h>
+
 int thrd_sleep(const struct timespec* duration, struct timespec* remaining) {
     if(!duration)
         return thrd_error;
+
+    // Initialize the kernel functions once per application.
     call_once(&sleep_flag, thrd_sleep_init);
+
     LARGE_INTEGER interval;
-    interval.QuadPart = -1 * (long long)(duration->tv_sec * 10000000) + (long long)(duration->tv_nsec / 100);
-    if(NtDelayExecution(FALSE, &interval) != 0)
+    interval.QuadPart = (long long)(duration->tv_sec * 10000000LL) + (long long)(duration->tv_nsec / 100LL);
+
+    // For some reason multiplying the -1 with the previous operation wasn't always negating it,
+    // but moving it to it's own worked.
+    interval.QuadPart *= -1;
+    if(NtDelayExecution(FALSE, &interval) != 0) {
         return thrd_error;
+    }
     return thrd_success;
 }
-
-#endif
 
 void thrd_exit(int res) {
     thread_specific_storage_cleanup();
@@ -194,7 +214,14 @@ int mtx_timedlock(mtx_t* mutex, const struct timespec* time_point) {
     if(!mutex || (mutex->type & mtx_timed) != mtx_timed || !mutex->handle)
         return thrd_error;
 
-    DWORD ms = (DWORD) (time_point->tv_sec * 1000 + time_point->tv_nsec / 1000000);
+    struct timespec current;
+    timespec_get(&current, TIME_UTC);
+    timespec_subtract(&current, time_point, &current);
+
+    if(current.tv_sec < 0)
+        return thrd_timedout;
+
+    DWORD ms = (DWORD) (current.tv_sec * 1000 + current.tv_nsec / 1000000);
     switch(WaitForSingleObject(mutex->handle, ms)) {
         case WAIT_ABANDONED:
         case WAIT_OBJECT_0:
@@ -434,7 +461,15 @@ int cnd_wait(cnd_t* cond, mtx_t* mutex) {
 int cnd_timedwait(cnd_t* cond, mtx_t* mutex, const struct timespec* time_point) {
     if(!time_point)
         return thrd_error;
-    DWORD ms = (DWORD) (time_point->tv_sec * 1000 + time_point->tv_nsec / 1000000);
+
+    struct timespec current;
+    timespec_get(&current, TIME_UTC);
+    timespec_subtract(&current, time_point, &current);
+
+    if(current.tv_sec < 0)
+        return thrd_timedout;
+
+    DWORD ms = (DWORD) (current.tv_sec * 1000 + current.tv_nsec / 1000000);
     return cnd_wait_ms(cond, mutex, ms);
 }
 

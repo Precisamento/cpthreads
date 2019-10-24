@@ -64,23 +64,7 @@ static __inline thrd_t thrd_current(void) {
     return (thrd_t){ GetCurrentThread() };
 }
 
-#ifndef CP_ACCURATE_SLEEP
-
-// Non-conforming implementation.
-// Sleep only has millisecond resolution, and remaining is never set.
-// For a more accurate version, define CP_ACCURATE_SLEEP, though
-// remaining is still not set.
-static __inline int thrd_sleep(const struct timespec* duration, struct timespec* remaining) {
-    DWORD ms = (DWORD) (duration->tv_sec * 1000 + duration->tv_nsec / 1000000);
-    Sleep(ms);
-    return thrd_success;
-}
-
-#else
-
 int thrd_sleep(const struct timespec* duration, struct timespec* remaining);
-
-#endif
 
 static __inline void thrd_yield(void) {
     SwitchToThread();

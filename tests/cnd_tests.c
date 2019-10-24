@@ -18,7 +18,7 @@ typedef struct Lock {
     bool done;
 } Lock;
 
-int signaler(Lock* lock) {
+static int signaler(Lock* lock) {
     mtx_lock(lock->mutex);
     lock->done = true;
     printf("Signal: %d\n", cnd_signal(lock->cond));
@@ -26,7 +26,7 @@ int signaler(Lock* lock) {
     return 1;
 }
 
-int broadcaster(Lock* lock) {
+static int broadcaster(Lock* lock) {
     mtx_lock(lock->mutex);
     lock->done = true;
     printf("Broadcast: %d\n", cnd_broadcast(lock->cond));
@@ -34,7 +34,7 @@ int broadcaster(Lock* lock) {
     return 1;
 }
 
-int waiter(Lock* lock) {
+static int waiter(Lock* lock) {
     mtx_lock(lock->mutex);
     while(!lock->done) 
         printf("Wait: %d\n", cnd_wait(lock->cond, lock->mutex));
