@@ -139,7 +139,6 @@ START_TEST(mtx_timed_lock_second_times_out) {
     assert_thrd(mtx_init(mutexes + 1, mtx_timed | mtx_recursive));
 
     for(int i = 0; i < 2; i++) {
-        printf("Iteration %d\n", i);
         thrd_t thread1, thread2;
         int result1, result2;
         assert_thrd(thrd_create(&thread1, time_lock_test, &(TimeLock){ 2000, 0, mutexes + i }));
@@ -147,7 +146,6 @@ START_TEST(mtx_timed_lock_second_times_out) {
         assert_thrd(thrd_create(&thread2, time_lock_test, &(TimeLock){ 100, 50, mutexes + i }));
         assert_thrd(thrd_join(thread1, &result1));
         assert_thrd(thrd_join(thread2, &result2));
-        printf("Result: %d\n", result1);
         ck_assert(result1 == thrd_success);
         ck_assert(result2 == thrd_timedout);
     }

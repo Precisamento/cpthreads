@@ -105,8 +105,6 @@ static void thrd_sleep_init(void) {
     ZwSetTimerResolution(1, TRUE, &actualResolution);
 }
 
-#include <stdio.h>
-
 int thrd_sleep(const struct timespec* duration, struct timespec* remaining) {
     if(!duration)
         return thrd_error;
