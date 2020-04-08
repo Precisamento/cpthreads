@@ -4,6 +4,8 @@ test_link_args = []
 
 build_tests = false
 
+cc_args = ''
+
 if cc.get_id() == 'msvc' and check_location != ''
     check_lib = check_location + '/lib'
 
@@ -29,6 +31,8 @@ elif get_option('build_tests')
 
     inc = include_directories()
 
+    cc_args = '-std=c11'
+
     deps = [check]
 
     build_tests = true
@@ -40,7 +44,8 @@ if build_tests
         link_with: cpthreads,
         link_args: test_link_args,
         include_directories: inc,
-        dependencies: deps
+        dependencies: deps,
+        c_args: cc_args
     )
     
     mutex_test = executable('mutex_test',
@@ -48,7 +53,8 @@ if build_tests
         link_with: cpthreads,
         link_args: test_link_args,
         include_directories: inc,
-        dependencies: deps
+        dependencies: deps,
+        c_args: cc_args
     )
 
     tss_test = executable('tss_test',
@@ -56,7 +62,8 @@ if build_tests
         link_with: cpthreads,
         link_args: test_link_args,
         include_directories: inc,
-        dependencies: deps
+        dependencies: deps,
+        c_args: cc_args
     )
 
     cnd_test = executable('cnd_test',
@@ -64,7 +71,8 @@ if build_tests
         link_with: cpthreads,
         link_args: test_link_args,
         include_directories: inc,
-        dependencies: deps
+        dependencies: deps,
+        c_args: cc_args
     )
     
     test('Thread Test', thread_test)
