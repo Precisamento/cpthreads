@@ -1,25 +1,38 @@
 check_location = get_option('check_location')
 
-if check_location != ''
+test_link_args = []
+
+if cc.get_id() == 'msvc' and check_location != ''
     check_lib = check_location + '/lib'
-    
+
     compat = cc.find_library('compat',
         required: true,
         dirs: check_lib)
-    
+
     check = cc.find_library('check',
         required: true,
         dirs: check_lib)
-    
+
     deps = [compat, check]
     inc = include_directories([check_location + '/include'])
-    
-    test_link_args = []
-    
+
     if get_option('buildtype') == 'release'
         test_link_args += '/NODEFAULTLIB:MSVCRTD'
     endif
-    
+
+    build_tests = true
+elif get_option('build_tests')
+    check = cc.find_library('check',
+        required: true)
+
+    inc = include_directories()
+
+    deps = [check]
+
+    build_tests = true
+endif
+
+if build_tests
     thread_test = executable('thread_test',
         'thread_tests.c',
         link_with: cpthreads,
