@@ -2,6 +2,8 @@ check_location = get_option('check_location')
 
 test_link_args = []
 
+build_tests = false
+
 if cc.get_id() == 'msvc' and check_location != ''
     check_lib = check_location + '/lib'
 
